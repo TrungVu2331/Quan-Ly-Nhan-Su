@@ -1,2 +1,2 @@
-// Entry point chuyển tiếp tới server.js
-require('./server.js');
+  // Entry point chuyển tiếp tới server.js
+require('./server.js'); 
