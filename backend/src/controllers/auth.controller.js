@@ -4,6 +4,17 @@ const { generateToken } = require('../utils/token');
 const { sendOtpEmail } = require('../services/mail.service');
 
 /**
+ * Xác định có trả về otpPreview cho client không (chỉ bật khi dev hoặc khi chưa gửi được mail thật)
+ */
+const getOtpPreview = (otpCode, mailResult) => {
+    const isRealEmailSent = mailResult?.success && !mailResult?.isMock;
+    if (process.env.NODE_ENV !== 'production' || !isRealEmailSent) {
+        return otpCode;
+    }
+    return undefined;
+};
+
+/**
  * Đăng ký tài khoản mới
  * POST /api/auth/register
  */
@@ -55,13 +66,16 @@ const register = async (req, res, next) => {
         }
 
         // Gửi email chứa mã OTP
-        await sendOtpEmail(normalizedEmail, otpCode, full_name.trim());
+        const mailResult = await sendOtpEmail(normalizedEmail, otpCode, full_name.trim());
+        const otpPreview = getOtpPreview(otpCode, mailResult);
 
         res.status(201).json({
             success: true,
-            message: 'Đăng ký thành công! Mã OTP đã được gửi đến email của bạn. Vui lòng kiểm tra hộp thư (hoặc terminal server).',
+            message: otpPreview
+                ? 'Đăng ký thành công! Vui lòng sử dụng mã OTP hiển thị trên màn hình để xác thực.'
+                : 'Đăng ký thành công! Mã OTP đã được gửi đến email của bạn. Vui lòng kiểm tra hộp thư (hoặc thư mục Spam).',
             email: normalizedEmail,
-            otpPreview: process.env.NODE_ENV !== 'production' ? otpCode : undefined, // Giúp test nhanh
+            otpPreview,
         });
     } catch (error) {
         next(error);
@@ -176,12 +190,15 @@ const resendOtp = async (req, res, next) => {
             WHERE id = $3
         `, [otpCode, otpExpiresAt, user.id]);
 
-        await sendOtpEmail(normalizedEmail, otpCode, user.full_name);
+        const mailResult = await sendOtpEmail(normalizedEmail, otpCode, user.full_name);
+        const otpPreview = getOtpPreview(otpCode, mailResult);
 
         res.status(200).json({
             success: true,
-            message: 'Mã OTP mới đã được gửi thành công!',
-            otpPreview: process.env.NODE_ENV !== 'production' ? otpCode : undefined,
+            message: otpPreview
+                ? 'Mã OTP mới đã được tạo trên màn hình!'
+                : 'Mã OTP mới đã được gửi tới email của bạn!',
+            otpPreview,
         });
     } catch (error) {
         next(error);

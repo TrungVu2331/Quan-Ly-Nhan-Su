@@ -12,9 +12,25 @@ if (process.platform === 'win32' && connectionString && connectionString.include
     connectionString = connectionString.replace('@postgres_db:', '@localhost:')
 }
 
+// Tự động cấu hình SSL cho Cloud Database (Neon, Render External, Supabase, Railway...)
+// Nếu chạy localhost, 127.0.0.1 hoặc mạng nội bộ (Docker/Render Internal) thì giữ tắt SSL
+let useSsl = false
+if (connectionString) {
+    try {
+        const dbUrl = new URL(connectionString)
+        const host = dbUrl.hostname
+        const isLocalHost = host === 'localhost' || host === '127.0.0.1' || !host.includes('.')
+        const forceSsl = dbUrl.searchParams.get('sslmode') === 'require' || process.env.DB_SSL === 'true'
+        useSsl = forceSsl || !isLocalHost
+    } catch {
+        useSsl = process.env.DB_SSL === 'true'
+    }
+}
+
 // Khởi tạo một Connect Pool duy nhất dùng chung cho toàn bộ app
 const pool = new Pool({
     connectionString,
+    ssl: useSsl ? { rejectUnauthorized: false } : false,
 })
 
 // Sự kiện: Khi một clinet mới kết nối thành công vào Pool

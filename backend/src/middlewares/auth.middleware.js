@@ -47,5 +47,5 @@ const authorize = (...roles) => {
 module.exports = {
     authenticate,
     authorize,
-    verifyToken: authenticate, // alias theo AGENT.md
+    verifyToken: authenticate,
 };

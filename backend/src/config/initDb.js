@@ -125,7 +125,8 @@ const initDatabase = async () => {
             console.log('👉 Tài khoản mặc định: admin@hrm.vn / Mật khẩu: Admin@123');
         }
     } catch (error) {
-        console.error('❌ Lỗi khởi tạo cơ sở dữ liệu:', error.message);
+        const errorDetail = error.errors?.map(e => e.message).join('; ') || error.message || error;
+        console.error('❌ Lỗi khởi tạo cơ sở dữ liệu:', errorDetail);
         throw error;
     }
 };

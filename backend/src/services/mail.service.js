@@ -1,17 +1,9 @@
 const { getTransporter } = require('../config/mailer');
 
 /**
- * Gửi email chứa mã OTP xác thực tài khoản
- * @param {string} toEmail - Địa chỉ email người nhận
- * @param {string} otpCode - Mã OTP 6 chữ số
- * @param {string} fullName - Tên người nhận
+ * Tạo nội dung HTML cho email chứa mã OTP
  */
-const sendOtpEmail = async (toEmail, otpCode, fullName = 'Người dùng') => {
-    const transporter = getTransporter();
-
-    const fromAddress = process.env.EMAIL_FROM || '"HRM System" <noreply@hrm.vn>';
-
-    const htmlContent = `
+const buildOtpHtmlTemplate = (otpCode, fullName) => `
     <!DOCTYPE html>
     <html lang="vi">
     <head>
@@ -47,25 +39,98 @@ const sendOtpEmail = async (toEmail, otpCode, fullName = 'Người dùng') => {
         </div>
     </body>
     </html>
-    `;
+`;
 
-    // In mã OTP ra màn hình terminal để hỗ trợ test nhanh mà không bắt buộc phải check mail
+/**
+ * Gửi email qua Brevo HTTP API (Port 443 - hoạt động ổn định trên Render Free tier)
+ */
+const sendViaBrevoApi = async ({ toEmail, fullName, subject, htmlContent }) => {
+    const apiKey = process.env.BREVO_API_KEY;
+    const senderEmail = process.env.BREVO_SENDER_EMAIL || process.env.EMAIL_USER;
+    const senderName = process.env.BREVO_SENDER_NAME || 'HRM System';
+
+    if (!senderEmail || senderEmail.includes('your_email')) {
+        throw new Error('Thiếu cấu hình BREVO_SENDER_EMAIL hợp lệ!');
+    }
+
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+            accept: 'application/json',
+            'content-type': 'application/json',
+            'api-key': apiKey,
+        },
+        body: JSON.stringify({
+            sender: { name: senderName, email: senderEmail },
+            to: [{ email: toEmail, name: fullName }],
+            subject,
+            htmlContent,
+        }),
+        signal: AbortSignal.timeout(10000),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(data.message || `Brevo API lỗi HTTP ${response.status}`);
+    }
+
+    return {
+        success: true,
+        isMock: false,
+        provider: 'brevo',
+        messageId: data.messageId,
+    };
+};
+
+/**
+ * Gửi email chứa mã OTP xác thực tài khoản
+ * @param {string} toEmail - Địa chỉ email người nhận
+ * @param {string} otpCode - Mã OTP 6 chữ số
+ * @param {string} fullName - Tên người nhận
+ */
+const sendOtpEmail = async (toEmail, otpCode, fullName = 'Người dùng') => {
+    const subject = `[HRM System] Mã xác thực OTP tài khoản của bạn: ${otpCode}`;
+    const htmlContent = buildOtpHtmlTemplate(otpCode, fullName);
+
+    // In mã OTP ra màn hình terminal để hỗ trợ test nhanh và theo dõi server logs
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log(`🔐 [MÃ OTP XÁC THỰC CHO ${toEmail}]: ====> ${otpCode} <====`);
     console.log('⏰ Thời hạn: 5 phút');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
+    // Ưu tiên 1: Gửi qua Brevo HTTP API (cổng 443, không bị chặn trên Render Free)
+    if (process.env.BREVO_API_KEY) {
+        try {
+            const result = await sendViaBrevoApi({ toEmail, fullName, subject, htmlContent });
+            console.log(`📧 [Brevo API]: Đã gửi OTP thành công tới ${toEmail} (ID: ${result.messageId})`);
+            return result;
+        } catch (error) {
+            console.error('⚠️ [Brevo API]: Không thể gửi email:', error.message);
+            return { success: false, isMock: true, error: error.message };
+        }
+    }
+
+    // Ưu tiên 2: Nodemailer (SMTP khi chạy Local / Paid server, hoặc Mock khi chưa cấu hình)
+    const transporter = getTransporter();
+    const fromAddress = process.env.EMAIL_FROM || '"HRM System" <noreply@hrm.vn>';
+
     try {
         const info = await transporter.sendMail({
             from: fromAddress,
             to: toEmail,
-            subject: `[HRM System] Mã xác thực OTP tài khoản của bạn: ${otpCode}`,
+            subject,
             html: htmlContent,
         });
-        return { success: true, messageId: info.messageId };
+        const isMock = Boolean(info.messageId && info.messageId.startsWith('dev-mock-id-'));
+        return {
+            success: true,
+            isMock,
+            provider: isMock ? 'mock' : 'smtp',
+            messageId: info.messageId,
+        };
     } catch (error) {
         console.error('⚠️ Không thể gửi mail qua SMTP, nhưng OTP đã được ghi log:', error.message);
-        return { success: false, error: error.message };
+        return { success: false, isMock: true, error: error.message };
     }
 };
 

@@ -17,7 +17,8 @@ const startServer = async () => {
             console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         });
     } catch (error) {
-        console.error('❌ Không thể khởi động server backend:', error.message);
+        const errorDetail = error.errors?.map(e => e.message).join('; ') || error.message || error;
+        console.error('❌ Không thể khởi động server backend:', errorDetail);
         process.exit(1);
     }
 };
